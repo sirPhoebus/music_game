@@ -45,12 +45,19 @@ An interactive music puzzle game where players must match AI-generated album art
     npm install
     ```
 
-3.  **Run the development server**
+3.  **Configure Environment**
+    Create a `.env.local` file in the root directory and add your Google Gemini API key:
+    ```env
+    GEMINI_API_KEY=your_api_key_here
+    ```
+    You can get an API key from [Google AI Studio](https://aistudio.google.com/).
+
+4.  **Run the development server**
     ```bash
     npm run dev
     ```
 
-4.  **Open in Browser**
+5.  **Open in Browser**
     Navigate to `http://localhost:3000` (or the port shown in your terminal).
 
 ## 📝 License
