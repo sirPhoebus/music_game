@@ -1,0 +1,490 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background-color: #050505;
+  color: #0ff;
+  font-family: 'Orbitron', monospace;
+}
+
+body {
+  overflow: hidden;
+  background-image: 
+    linear-gradient(rgba(0, 255, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 255, 0.1) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+body.dragging {
+  cursor: grabbing;
+}
+
+body.dragging * {
+  user-select: none;
+  pointer-events: none;
+}
+
+/* WeightSlider */
+weight-slider {
+  cursor: ew-resize;
+  position: relative;
+  width: 100%;
+  height: 4vmin;
+  display: flex;
+  justify-content: center;
+  flex-direction: row;
+  align-items: center;
+  padding: 5px;
+  pointer-events: none; /* Locked as per request */
+  filter: grayscale(100%); /* Greyed out when not active/locked */
+}
+
+weight-slider .scroll-container {
+  height: 100%;
+  width: 100%;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 1vmin;
+}
+
+weight-slider .slider-container {
+  position: relative;
+  height: 10px;
+  width: 100%;
+  background-color: #111;
+  border: 1px solid #333;
+  border-radius: 2px;
+  flex-grow: 1;
+}
+
+weight-slider #thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: #0ff;
+  box-shadow: 0 0 10px #0ff;
+  border-radius: 1px;
+}
+
+weight-slider .value-display {
+  display: none;
+}
+
+/* IconButton Base */
+play-pause-button,
+reset-button,
+add-prompt-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto; /* Ensure buttons are clickable */
+}
+
+play-pause-button svg,
+reset-button svg,
+add-prompt-button svg {
+  width: 100%;
+  height: 100%;
+  transition: transform 0.2s, filter 0.2s;
+  filter: drop-shadow(0 0 2px #0ff);
+}
+
+play-pause-button:hover svg,
+reset-button:hover svg,
+add-prompt-button:hover svg {
+  transform: scale(1.1);
+  filter: drop-shadow(0 0 5px #0ff);
+}
+
+.hitbox {
+  pointer-events: all;
+  position: absolute;
+  width: 65%;
+  aspect-ratio: 1;
+  top: 9%;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* PlayPauseButton Loader */
+.loader {
+  stroke: #0ff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  animation: spin linear 1s infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(359deg);
+  }
+}
+
+/* Toast Message */
+toast-message .toast {
+  line-height: 1.6;
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.9);
+  border: 1px solid #0ff;
+  color: #0ff;
+  padding: 15px;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  min-width: 200px;
+  max-width: 80vw;
+  transition: transform 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+  z-index: 100;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+}
+
+toast-message button {
+  background: none;
+  border: none;
+  color: #0ff;
+  cursor: pointer;
+  font-size: 1.2em;
+}
+
+toast-message .toast:not(.showing) {
+  transition-duration: 1s;
+  transform: translate(-50%, -200%);
+}
+
+/* LpSleeve */
+lp-sleeve {
+  display: block;
+  height: 100%; 
+  max-height: 100%;
+  aspect-ratio: 1 / 1;
+  border: 1px solid #333;
+  overflow: hidden;
+  cursor: grab;
+  box-shadow: 0 0 5px rgba(0, 255, 255, 0.2);
+  transition: transform 0.2s, box-shadow 0.2s;
+  background: #000;
+  margin: 0 auto;
+}
+
+lp-sleeve:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+  border-color: #0ff;
+  z-index: 10;
+}
+
+lp-sleeve[dragging] {
+  opacity: 0.5;
+  border: 1px dashed #0ff;
+}
+
+lp-sleeve img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* PromptController */
+prompt-controller {
+  display: block;
+  flex: 1; 
+  min-height: 0; 
+  width: 100%;
+  margin-bottom: 1vmin;
+}
+
+prompt-controller .prompt {
+  position: relative;
+  width: 100%;
+  height: 100%; 
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  grid-template-rows: 100%;
+  align-items: center;
+  box-sizing: border-box;
+  overflow: hidden; 
+  background-color: rgba(10, 10, 10, 0.8);
+  border: 1px solid #333;
+  padding: 1vmin;
+  gap: 1.5vmin;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    0 100%
+  );
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+prompt-controller[matched='true'] .prompt {
+  border: 1px solid #0f0;
+  box-shadow: inset 0 0 15px rgba(0, 255, 0, 0.1);
+}
+
+prompt-controller[matched='false'] .prompt {
+  border: 1px solid #f00;
+  box-shadow: inset 0 0 15px rgba(255, 0, 0, 0.1);
+}
+
+prompt-controller .image-slot {
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 30vh; 
+  background: rgba(0, 255, 255, 0.05);
+  border: 1px dashed #333;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+prompt-controller .image-slot:hover {
+  border-color: #0ff;
+  background: rgba(0, 255, 255, 0.1);
+}
+
+prompt-controller .image-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+prompt-controller .image-slot span {
+  font-size: 0.8em;
+  color: #555;
+  text-align: center;
+  font-family: 'Orbitron', monospace;
+}
+
+prompt-controller .play-button {
+  background: rgba(0, 255, 255, 0.05);
+  border: 1px solid rgba(0, 255, 255, 0.3);
+  border-radius: 0;
+  cursor: pointer;
+  color: #0ff;
+  width: 5vmin;
+  height: 5vmin;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 1vmin;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 20;
+  transition: all 0.2s ease;
+  clip-path: polygon(15% 0, 100% 0, 100% 85%, 85% 100%, 0 100%, 0 15%);
+}
+
+prompt-controller .play-button:hover {
+  background: rgba(0, 255, 255, 0.2);
+  box-shadow: 0 0 10px #0ff;
+  transform: scale(1.05);
+}
+
+prompt-controller .play-button svg {
+  width: 100%;
+  height: 100%;
+  fill: #0ff;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px #0ff);
+}
+
+prompt-controller .play-button.active {
+  background: rgba(0, 255, 0, 0.2);
+  border-color: #0f0;
+  box-shadow: 0 0 15px #0f0;
+  color: #0f0;
+}
+
+prompt-controller .play-button.active svg {
+  fill: #0f0;
+  filter: drop-shadow(0 0 5px #0f0);
+}
+
+prompt-controller .connector {
+  display: none; 
+}
+
+prompt-controller .drop-zone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  color: #0ff;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  border: 1px solid #0ff;
+  backdrop-filter: blur(2px);
+}
+
+prompt-controller[dragover] .drop-zone {
+  opacity: 1;
+  background: rgba(0, 255, 255, 0.15);
+}
+
+prompt-controller .controls {
+  display: none;
+}
+
+/* PromptDj */
+prompt-dj {
+  height: 100vh; 
+  width: 100vw;  
+  display: flex; 
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 2vmin;
+  position: relative;
+  overflow: hidden; 
+}
+
+#background {
+  display: none;
+}
+
+prompt-dj .prompts-area {
+  flex: 1; 
+  display: flex;
+  flex-direction: row;
+  gap: 2vmin;
+  width: 100%;
+  min-height: 0; 
+  overflow: hidden;
+}
+
+prompt-dj #prompts-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly; 
+  gap: 1vmin;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+
+prompt-dj .sleeve-deck {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly; 
+  align-items: center;
+  gap: 1vmin;
+  z-index: 10;
+  height: 100%;
+  padding: 1vmin;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid #333;
+  clip-path: polygon(
+    0 0,
+    100% 0,
+    100% calc(100% - 20px),
+    calc(100% - 20px) 100%,
+    0 100%
+  );
+  backdrop-filter: blur(5px);
+}
+
+prompt-dj .playback-container {
+  height: auto;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 2vmin;
+  padding-top: 1vmin;
+}
+
+.reveal-button {
+  background: transparent;
+  color: #0ff;
+  border: 1px solid #0ff;
+  padding: 1vmin 3vmin;
+  font-size: 2vmin;
+  cursor: pointer;
+  font-weight: bold;
+  font-family: 'Orbitron', monospace;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.2s;
+  clip-path: polygon(10% 0, 100% 0, 100% 80%, 90% 100%, 0 100%, 0 20%);
+}
+
+.reveal-button:hover {
+  background: rgba(0, 255, 255, 0.2);
+  box-shadow: 0 0 15px #0ff;
+  text-shadow: 0 0 5px #0ff;
+}
+
+.reveal-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: #555;
+  color: #555;
+}
+
+.reveal-button.reset {
+  color: #f0f;
+  border-color: #f0f;
+}
+
+.reveal-button.reset:hover {
+  background: rgba(255, 0, 255, 0.2);
+  box-shadow: 0 0 15px #f0f;
+  text-shadow: 0 0 5px #f0f;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border: 1px solid #000;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #0ff;
+}
+
+.add-prompt-button-container,
+#settings-container {
+  display: none;
+}
