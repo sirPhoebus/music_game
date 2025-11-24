@@ -3,7 +3,7 @@
 An interactive music puzzle game where players must match AI-generated album art to their corresponding musical genres by listening to real-time AI-generated audio tracks.
 
 <div align="center">
-  <img src="https://image.pollinations.ai/prompt/A%20cyberpunk%20music%20interface%20with%20neon%20glowing%20controls%20and%20holographic%20vinyl%20records" alt="Prompt DJ Banner" width="100%" />
+  <img src="banner.png" alt="Prompt DJ Banner" width="100%" />
 </div>
 
 ## 🎮 How to Play
