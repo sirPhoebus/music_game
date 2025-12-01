@@ -30,7 +30,7 @@ An interactive music puzzle game where players must match AI-generated album art
 *   **Build Tool**: [Vite](https://vitejs.dev/)
 *   **Language**: TypeScript
 *   **AI Audio**: Google Gemini / MusicFX API
-*   **AI Images**: Pollinations.ai
+*   **AI Images**: Google GenAI (Nano Banana)
 
 ## 🚀 Run Locally
 

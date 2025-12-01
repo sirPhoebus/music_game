@@ -18,9 +18,38 @@ import {
 import {decode, decodeAudioData} from './utils';
 
 const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
+  apiKey: import.meta.env.VITE_GEMINI_API_KEY,
   apiVersion: 'v1alpha',
 });
+
+const aiImages = new GoogleGenAI({
+  apiKey: import.meta.env.VITE_GEMINI_API_KEY,
+});
+
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
+
+async function generateImage(promptText: string): Promise<string> {
+  try {
+    const response = await aiImages.models.generateContent({
+      model: IMAGE_MODEL,
+      contents: 'Generate a creative illustration of an LP sleeve representing ' + promptText + '. Do not use any text.',
+    });
+
+    const parts = response.candidates?.[0]?.content?.parts;
+    if (parts) {
+      for (const part of parts) {
+        if (part.inlineData && part.inlineData.mimeType?.startsWith('image/')) {
+          return 'data:' + part.inlineData.mimeType + ';base64,' + part.inlineData.data;
+        }
+      }
+    }
+    return '';
+  } catch (e) {
+    console.error('Image generation failed', e);
+    return '';
+  }
+}
+
 let model = 'lyria-realtime-exp';
 
 interface Prompt {
@@ -473,6 +502,8 @@ class LpSleeve extends LitElement {
 
   @property({type: String}) src = '';
   @property({type: String}) promptId = '';
+  @property({type: String}) text = '';
+  @property({type: Boolean}) revealPrompt = false;
 
   private handleDragStart(e: DragEvent) {
     e.dataTransfer?.setData('text/plain', this.promptId);
@@ -491,6 +522,9 @@ class LpSleeve extends LitElement {
         @dragend=${this.handleDragEnd}
       >
         <img src=${this.src} alt="LP Sleeve" />
+        ${this.revealPrompt
+          ? html`<div class="sleeve-label">${this.text}</div>`
+          : null}
       </div>
     `;
   }
@@ -514,6 +548,7 @@ class PromptController extends LitElement {
   @property({type: String}) userAssignedPromptId = '';
   @property({type: Boolean}) isCorrectlyMatched = false;
   @property({type: Boolean}) isPlaying = false;
+  @property({type: Boolean}) revealPromptUsed = false;
 
   @query('weight-slider') private weightInput!: WeightSlider;
   @query('#text') private textInput!: HTMLSpanElement;
@@ -648,6 +683,10 @@ class PromptController extends LitElement {
             : svg`<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`
         }
       </button>
+
+      ${this.revealPromptUsed
+        ? html`<div class="prompt-used-label">prompt used : ${this.text}</div>`
+        : null}
 
       <div class="connector"></div>
 
@@ -1006,29 +1045,27 @@ class SettingsController extends LitElement {
 /** Component for the PromptDJ UI. */
 @customElement('prompt-dj')
 class PromptDj extends LitElement {
-  // Disable shadow DOM to use global CSS
   protected override createRenderRoot() {
     return this;
   }
 
-  @property({
-    type: Object,
-    attribute: false,
-  })
+  @property({type: Object, attribute: false})
   private prompts: Map<string, Prompt>;
-  private nextPromptId: number; // Monotonically increasing ID for new prompts
+  private nextPromptId: number;
   private session: LiveMusicSession;
   private readonly sampleRate = 48000;
   private audioContext = new (window.AudioContext ||
     (window as any).webkitAudioContext)({sampleRate: this.sampleRate});
   private outputNode: GainNode = this.audioContext.createGain();
   private nextStartTime = 0;
-  private readonly bufferTime = 2; // adds an audio buffer in case of netowrk latency
+  private readonly bufferTime = 2;
   @state() private playbackState: PlaybackState = 'stopped';
   @property({type: Object})
   private filteredPrompts = new Set<string>();
   private connectionError = true;
   @state() private isLoading = false;
+  @state() private gameFinished = false;
+  @state() private allCorrect = false;
 
   @query('play-pause-button') private playPauseButton!: PlayPauseButton;
   @query('toast-message') private toastMessage!: ToastMessage;
@@ -1042,8 +1079,32 @@ class PromptDj extends LitElement {
   }
 
   override async firstUpdated() {
+    try {
+      console.log('List of models available:', await ai.models.list());
+    } catch (e) {
+      console.error(e);
+    }
     await this.connectToSession();
     this.setSessionPrompts();
+    
+    for (const prompt of this.prompts.values()) {
+        if (!prompt.imageUrl) {
+            this.generatePromptImage(prompt.promptId, prompt.text);
+        }
+    }
+  }
+
+  private async generatePromptImage(promptId: string, text: string) {
+    const url = await generateImage(text);
+    if (url) {
+        const prompt = this.prompts.get(promptId);
+        if (prompt) {
+            prompt.imageUrl = url;
+            this.requestUpdate();
+            this.dispatchPromptsChange();
+            setStoredPrompts(this.prompts);
+        }
+    }
   }
 
   private async connectToSession() {
@@ -1126,7 +1187,7 @@ class PromptDj extends LitElement {
     }
 
     try {
-      await this.session.setWeightedPrompts({
+      await this.session?.setWeightedPrompts({
         weightedPrompts,
       });
     } catch (e) {
@@ -1151,16 +1212,10 @@ class PromptDj extends LitElement {
     }
 
     prompt.text = text;
-    // We no longer take weight from the event detail directly if we are managing play/pause logic here
-    // actually we do, but the event comes from the component.
-    // If 'isPlaying' changed, we update weight.
     
     if (isPlaying !== undefined && isPlaying !== prompt.isPlaying) {
-       // User toggled play button
        prompt.isPlaying = isPlaying;
        
-       // Mutually exclusive playback:
-       // If we just turned ON this prompt, turn OFF all others.
        if (prompt.isPlaying) {
            for (const [pid, p] of this.prompts) {
                if (pid !== promptId) {
@@ -1170,10 +1225,8 @@ class PromptDj extends LitElement {
            }
        }
        
-       // Set weight based on playing status
        prompt.weight = prompt.isPlaying ? 1 : 0;
     } else {
-        // Regular update (though weight slider is locked now, so this might not happen often)
         prompt.weight = weight;
     }
 
@@ -1184,11 +1237,8 @@ class PromptDj extends LitElement {
     prompt.isCorrectlyMatched = isCorrectlyMatched;
 
     const newPrompts = new Map(this.prompts);
-    
-    // Force update of all prompts to reflect mutual exclusivity
     this.prompts = newPrompts;
 
-    // Check if any prompt is playing to manage global playback state
     const anyPlaying = [...this.prompts.values()].some(p => p.isPlaying);
     if (anyPlaying) {
         if (this.playbackState === 'stopped' || this.playbackState === 'paused') {
@@ -1200,11 +1250,9 @@ class PromptDj extends LitElement {
         }
         this.setSessionPrompts();
     } else {
-        // If nothing is playing, stop the audio
         if (this.playbackState === 'playing' || this.playbackState === 'loading') {
             this.stopAudio();
         }
-        // We don't need to call setSessionPrompts if stopping, as stopAudio clears gain
     }
 
     this.requestUpdate();
@@ -1214,32 +1262,15 @@ class PromptDj extends LitElement {
   private handleSleeveDropped(e: CustomEvent<{targetPromptId: string, droppedPromptId: string}>) {
     const {targetPromptId, droppedPromptId} = e.detail;
     const targetPrompt = this.prompts.get(targetPromptId);
-    
-    // droppedPromptId might be a promptId from the deck OR from another prompt controller
-    // But the deck items use promptId too.
     const droppedPrompt = this.prompts.get(droppedPromptId);
 
     if (targetPrompt && droppedPrompt) {
-      // Check if the dropped prompt is currently assigned to another slot (swapping logic)
-      // We need to find if any OTHER prompt has this droppedPromptId assigned as userAssignedPromptId
-      // AND if the current targetPrompt has an image assigned, we might want to swap.
-      
-      // Case 1: Moving an image from Socket A to Socket B
-      // We need to clear it from Socket A.
       for (const p of this.prompts.values()) {
           if (p.userAssignedPromptId === droppedPromptId && p.promptId !== targetPromptId) {
-              // Image was previously here.
-              // If targetPrompt has an image, we could swap?
-              // For simplicity, let's just move it. 
-              // If targetPrompt has an image, we overwrite it (it goes back to deck effectively).
-              // Or we swap them.
-              
               if (targetPrompt.userAssignedPromptId) {
-                  // Swap!
                   p.userAssignedSrc = targetPrompt.userAssignedSrc;
                   p.userAssignedPromptId = targetPrompt.userAssignedPromptId;
               } else {
-                  // Just clear source
                   p.userAssignedSrc = undefined;
                   p.userAssignedPromptId = undefined;
                   p.matched = false;
@@ -1248,12 +1279,10 @@ class PromptDj extends LitElement {
           }
       }
 
-      // Assign the dropped image to the target prompt
       targetPrompt.userAssignedSrc = droppedPrompt.imageUrl;
       targetPrompt.userAssignedPromptId = droppedPromptId;
       targetPrompt.matched = true;
 
-      // Create new map to ensure reactivity
       const newPrompts = new Map(this.prompts);
       this.prompts = newPrompts;
 
@@ -1266,11 +1295,9 @@ class PromptDj extends LitElement {
 
   private handleReveal() {
     let correctCount = 0;
-    let totalAssigned = 0;
 
     for (const prompt of this.prompts.values()) {
       if (prompt.userAssignedPromptId) {
-        totalAssigned++;
         const assignedPrompt = this.prompts.get(prompt.userAssignedPromptId);
         if (assignedPrompt && assignedPrompt.text === prompt.text) {
           prompt.isCorrectlyMatched = true;
@@ -1280,62 +1307,63 @@ class PromptDj extends LitElement {
         }
       }
     }
-    
     this.requestUpdate();
     
-    if (correctCount === this.prompts.size) {
-        this.toastMessage.show("CONGRATULATIONS! All matched correctly! Starting new game...");
-        setTimeout(() => {
-            this.restartWithNewGame();
-        }, 3000);
+    this.gameFinished = true;
+    this.allCorrect = correctCount === this.prompts.size;
+    if (this.allCorrect) {
+        this.toastMessage.show('CONGRATULATIONS! All matched correctly! Ready for the next game?');
     } else {
-        this.toastMessage.show(`You got ${correctCount} out of ${this.prompts.size} correct.`);
+        this.toastMessage.show(
+          'You got ' +
+          correctCount +
+          ' out of ' +
+          this.prompts.size +
+          ' correct. Ready for the next game?'
+        );
     }
+  }
+
+  private handleNextGame() {
+    this.gameFinished = false;
+    this.restartWithNewGame();
   }
 
   private restartWithNewGame() {
     this.isLoading = true;
-    // 1. Pick 5 new random genres
+    this.gameFinished = false;
+    this.allCorrect = false;
     const numPrompts = 5;
     const shuffled = [...PROMPT_TEXT_PRESETS].sort(() => Math.random() - 0.5);
     const selectedGenres = shuffled.slice(0, numPrompts);
     
     const newPromptsMap = new Map<string, Prompt>();
     const usedColors: string[] = [];
-
-    // We need to preload images or just let them load naturally.
-    // To show loader, we can just set state and wait a bit, 
-    // or rely on image load events?
-    // For simplicity, let's keep loader for a fixed time or until we set prompts?
-    // Actually the images are URLs, they will load async in the browser.
-    // We can keep the loader up for a short animation time (e.g. 1.5s) to simulate "generating".
     
     setTimeout(() => {
         for(let i=0; i<numPrompts; i++) {
             const text = selectedGenres[i];
             const color = getUnusedRandomColor(usedColors);
             usedColors.push(color);
-            const promptId = `prompt-${i}`;
+            const promptId = 'prompt-' + i;
             
             newPromptsMap.set(promptId, {
                 promptId,
                 text,
                 weight: 0,
                 color,
-                imageUrl: `https://image.pollinations.ai/prompt/Create%20a%20LP%20sleeves%20that%20represent%20${encodeURIComponent(text)}.%20Do%20not%20use%20any%20text%20on%20the%20image.%20Creative%20illustration?n=${Math.random()}`,
+                imageUrl: '',
                 matched: false,
                 isPlaying: false
             });
+            
+            this.generatePromptImage(promptId, text);
         }
 
         this.prompts = newPromptsMap;
-        
-        // 2. Reset state
         this.playbackState = 'stopped';
         this.stopAudio();
         setStoredPrompts(this.prompts);
-        
-        // 3. Update Session
         this.setSessionPrompts();
         this.requestUpdate();
         this.dispatchPromptsChange();
@@ -1350,18 +1378,17 @@ class PromptDj extends LitElement {
         prompt.matched = false;
         prompt.isCorrectlyMatched = undefined;
     }
+    this.gameFinished = false;
+    this.allCorrect = false;
     this.requestUpdate();
     this.dispatchPromptsChange();
     this.toastMessage.show("Game Reset!");
   }
 
-  /** Generates radial gradients for each prompt based on weight and color. */
   private makeBackground() {
     const clamp01 = (v: number) => Math.min(Math.max(v, 0), 1);
-
     const MAX_WEIGHT = 0.5;
     const MAX_ALPHA = 0.6;
-
     const bg: string[] = [];
 
     [...this.prompts.values()].forEach((p, i) => {
@@ -1373,8 +1400,7 @@ class PromptDj extends LitElement {
       const stop = p.weight / 2;
       const x = (i % 4) / 3;
       const y = Math.floor(i / 4) / 3;
-      const s = `radial-gradient(circle at ${x * 100}% ${y * 100}%, ${p.color}${alpha} 0px, ${p.color}00 ${stop * 100}%)`;
-
+      const s = 'radial-gradient(circle at ' + (x * 100) + '% ' + (y * 100) + '%, ' + p.color + alpha + ' 0px, ' + p.color + '00 ' + (stop * 100) + '%)';
       bg.push(s);
     });
 
@@ -1400,7 +1426,7 @@ class PromptDj extends LitElement {
   }
 
   private pauseAudio() {
-    this.session.pause();
+    this.session?.pause();
     this.playbackState = 'paused';
     this.outputNode.gain.setValueAtTime(1, this.audioContext.currentTime);
     this.outputNode.gain.linearRampToValueAtTime(
@@ -1414,7 +1440,7 @@ class PromptDj extends LitElement {
 
   private loadAudio() {
     this.audioContext.resume();
-    this.session.play();
+    this.session?.play();
     this.playbackState = 'loading';
     this.outputNode.gain.setValueAtTime(0, this.audioContext.currentTime);
     this.outputNode.gain.linearRampToValueAtTime(
@@ -1424,7 +1450,7 @@ class PromptDj extends LitElement {
   }
 
   private stopAudio() {
-    this.session.stop();
+    this.session?.stop();
     this.playbackState = 'stopped';
     this.outputNode.gain.setValueAtTime(0, this.audioContext.currentTime);
     this.outputNode.gain.linearRampToValueAtTime(
@@ -1435,39 +1461,35 @@ class PromptDj extends LitElement {
   }
 
   private async handleAddPrompt() {
-    const newPromptId = `prompt-${this.nextPromptId++}`;
+    const newPromptId = 'prompt-' + this.nextPromptId++;
     const usedColors = [...this.prompts.values()].map((p) => p.color);
     const newPrompt: Prompt = {
       promptId: newPromptId,
-      text: 'New Prompt', // Default text
+      text: 'New Prompt',
       weight: 0,
       color: getUnusedRandomColor(usedColors),
-      imageUrl: `https://image.pollinations.ai/prompt/Create%20a%20LP%20sleeves%20that%20represent%20New%20Prompt.%20Do%20not%20use%20any%20text%20on%20the%20image.%20Creative%20illustration?n=${Math.random()}`,
+      imageUrl: '',
       matched: false,
     };
     const newPrompts = new Map(this.prompts);
     newPrompts.set(newPromptId, newPrompt);
     this.prompts = newPrompts;
+    
+    this.generatePromptImage(newPromptId, 'New Prompt');
 
     await this.setSessionPrompts();
-
-    // Wait for the component to update and render the new prompt.
-    // Do not dispatch the prompt change event until the user has edited the prompt text.
     await this.updateComplete;
 
-    // Find the newly added prompt controller element
     const newPromptElement = this.renderRoot.querySelector<PromptController>(
-      `prompt-controller[promptId="${newPromptId}"]`,
+      'prompt-controller[promptId="' + newPromptId + '"]',
     );
     if (newPromptElement) {
-      // Scroll the prompts container to the new prompt element
       newPromptElement.scrollIntoView({
         behavior: 'smooth',
         block: 'nearest',
         inline: 'end',
       });
 
-      // Select the new prompt text
       const textSpan =
         newPromptElement.shadowRoot?.querySelector<HTMLSpanElement>('#text');
       if (textSpan) {
@@ -1492,16 +1514,14 @@ class PromptDj extends LitElement {
       this.dispatchPromptsChange();
     } else {
       console.warn(
-        `Attempted to remove non-existent prompt ID: ${promptIdToRemove}`,
+        'Attempted to remove non-existent prompt ID: ' + promptIdToRemove,
       );
     }
   }
 
-  // Handle scrolling X-axis the prompts container.
   private handlePromptsContainerWheel(e: WheelEvent) {
     const container = e.currentTarget as HTMLElement;
     if (e.deltaX !== 0) {
-      // Prevent the default browser action (like page back/forward)
       e.preventDefault();
       container.scrollLeft += e.deltaX;
     }
@@ -1522,7 +1542,7 @@ class PromptDj extends LitElement {
       this.setSessionPrompts();
     }
     this.pauseAudio();
-    this.session.resetContext();
+    this.session?.resetContext();
     this.settingsController.resetToDefaults();
     this.session?.setMusicGenerationConfig({
       musicGenerationConfig: {},
@@ -1560,22 +1580,16 @@ class PromptDj extends LitElement {
       <div class="playback-container">
         <button class="reveal-button" @click=${this.handleReveal}>Reveal Matches</button>
         <button class="reveal-button" style="background: #f44336" @click=${this.handleResetGame}>Reset Game</button>
+        ${this.gameFinished
+          ? html`<button class="reveal-button" style="background: #4caf50" @click=${this.handleNextGame}>
+              Ready for next game
+            </button>`
+          : null}
       </div>
       <toast-message></toast-message>`;
   }
 
   private renderPrompts() {
-    // Create a copy of the values and shuffle them for display
-    // We use a seed or just random sorting on each render? 
-    // If we shuffle on each render, the sliders will jump around when updating state.
-    // We need to shuffle once or maintain a shuffled order.
-    // For now, let's just map values directly, as the requirement was "random order".
-    // But since the prompt list is static after init, we can just use the values.
-    // To truly shuffle visually but keep logic, we'd need a separate `displayOrder` state.
-    // For MVP, we'll assume the initial creation was random enough, OR we shuffle in `gen`.
-    // Actually `gen` creates them in order.
-    // Let's create a memoized shuffled list of IDs if we really want to shuffle display.
-    // But given constraints, let's just render.
     return [...this.prompts.values()].map((prompt) => {
       return html`<prompt-controller
         .promptId=${prompt.promptId}
@@ -1589,17 +1603,13 @@ class PromptDj extends LitElement {
         .userAssignedPromptId=${prompt.userAssignedPromptId}
         .isCorrectlyMatched=${prompt.isCorrectlyMatched}
         .isPlaying=${prompt.isPlaying}
+        .revealPromptUsed=${this.gameFinished && this.allCorrect}
         @prompt-changed=${this.handlePromptChanged}>
       </prompt-controller>`;
     });
   }
 
   private renderSleeves() {
-    // Show all sleeves that are NOT assigned to any prompt yet?
-    // Or just show all sleeves and allow dragging copies? 
-    // "drag and dropping one img to a sound" implies moving it.
-    // So we should filter out sleeves that are currently assigned.
-    
     const assignedPromptIds = new Set<string>();
     for(const p of this.prompts.values()) {
         if (p.userAssignedPromptId) {
@@ -1613,6 +1623,8 @@ class PromptDj extends LitElement {
       <lp-sleeve
         .src=${p.imageUrl}
         .promptId=${p.promptId}
+        .text=${p.text}
+        .revealPrompt=${this.gameFinished}
       ></lp-sleeve>
     `);
   }
@@ -1633,6 +1645,12 @@ function getStoredPrompts(): Map<string, Prompt> {
     try {
       const prompts = JSON.parse(storedPrompts) as Prompt[];
       console.log('Loading stored prompts', prompts);
+      // Clear legacy pollinations URLs so they can be regenerated with Nano Banana
+      for (const p of prompts) {
+        if (p.imageUrl && p.imageUrl.includes('pollinations')) {
+          p.imageUrl = '';
+        }
+      }
       return new Map(prompts.map((prompt) => [prompt.promptId, prompt]));
     } catch (e) {
       console.error('Failed to parse stored prompts', e);
@@ -1641,13 +1659,9 @@ function getStoredPrompts(): Map<string, Prompt> {
 
   console.log('No stored prompts, creating prompt presets');
 
-  const defaultGenreSelection = [
-    'Minimal Techno',
-    'Bossa Nova',
-    'Post Punk',
-    'Lush Strings',
-    'Dubstep',
-  ];
+  const numPrompts = 5;
+  const shuffled = [...PROMPT_TEXT_PRESETS].sort(() => Math.random() - 0.5);
+  const defaultGenreSelection = shuffled.slice(0, numPrompts);
 
   const defaultPrompts: Prompt[] = [];
   const usedColors: string[] = [];
@@ -1660,9 +1674,7 @@ function getStoredPrompts(): Map<string, Prompt> {
       text,
       weight: 0,
       color,
-      imageUrl: `https://image.pollinations.ai/prompt/Create%20a%20LP%20sleeves%20that%20represent%20${encodeURIComponent(
-        text,
-      )}.%20Do%20not%20use%20any%20text%20on%20the%20image.%20Creative%20illustration?n=${Math.random()}`,
+      imageUrl: '',
       matched: false,
       isPlaying: false,
     });
